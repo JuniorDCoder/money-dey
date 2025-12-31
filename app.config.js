@@ -1,4 +1,4 @@
-{
+module.exports = {
   "expo": {
     "name": "money-dey",
     "slug": "money-dey",
@@ -8,13 +8,6 @@
     "scheme": "moneydey",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
-    // "ios": {
-    //   "supportsTablet": true,
-    //   "bundleIdentifier": "com.money_dey.com",
-    //   "infoPlist": {
-    //     "ITSAppUsesNonExemptEncryption": false
-    //   }
-    // },
     "android": {
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
@@ -25,7 +18,7 @@
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
       "package": "com.money_dey.com",
-      "googleServicesFile": "./google-services.json"
+      "googleServicesFile": process.env.GOOGLE_SERVICES_JSON_PATH ?? "./google-services.json"
     },
     "web": {
       "output": "static",
@@ -56,6 +49,13 @@
         "projectId": "ab96a838-39dc-4814-b73f-6c982ab907cc"
       }
     },
-    "owner": "juniordcoder"
+    "owner": "juniordcoder",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/ab96a838-39dc-4814-b73f-6c982ab907cc"
+    },
+    "ios": {}
   }
 }

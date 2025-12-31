@@ -352,7 +352,7 @@ export default function Recommendations() {
 
     const callAi = async (prompt: string) => {
         try {
-            const apiKey = process.env.EXPO_PUBLIC_GEMINI_KEY;
+            const apiKey = process.env.GEMINI_KEY;
             if (!apiKey) throw new Error('Missing EXPO_PUBLIC_GEMINI_KEY');
 
             const model = 'gemini-2.5-flash';

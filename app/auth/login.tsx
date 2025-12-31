@@ -60,6 +60,7 @@ export default function Login() {
         } catch (e) {
             const msg = getFriendlyAuthErrorMessage(e);
             setError(msg);
+            console.log("Firebase error: ", e);
             Toast.show({ type: 'error', text1: 'Sign in failed', text2: msg });
         } finally {
             setLoading(false);

@@ -1,0 +1,42 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Only allow authenticated users
+    function isAuthed() {
+      return request.auth != null;
+    }
+
+    // User settings: each user can read/write only their own doc
+    match /userSettings/{userId} {
+      allow read, write: if isAuthed() && request.auth.uid == userId;
+    }
+
+    // Existing collections (examples below; adjust to your needs)
+    match /debts/{docId} {
+      allow read: if isAuthed();
+      allow write: if isAuthed();
+    }
+
+    match /repayments/{docId} {
+      allow read: if isAuthed();
+      allow write: if isAuthed();
+    }
+
+    match /transactions/{docId} {
+      allow read: if isAuthed();
+      allow write: if isAuthed();
+    }
+
+    match /notifications/{docId} {
+      allow read: if isAuthed() && request.auth.uid == resource.data.userId;
+      allow create: if isAuthed() && request.auth.uid == request.resource.data.userId;
+      allow update, delete: if isAuthed() && request.auth.uid == resource.data.userId;
+    }
+
+    // Users profile: only allow user to read/write their own profile
+    match /users/{userId} {
+      allow read, write: if isAuthed() && request.auth.uid == userId;
+    }
+  }
+}

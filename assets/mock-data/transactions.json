@@ -1,0 +1,63 @@
+[
+  {
+    "id": "tx_001",
+    "userId": "user_123",
+    "amount": 250000,
+    "type": "income",
+    "category": "Salary",
+    "notes": "November salary",
+    "date": "2025-11-30T08:00:00.000Z",
+    "createdAt": "2025-11-30T08:00:00.000Z"
+  },
+  {
+    "id": "tx_002",
+    "userId": "user_123",
+    "amount": 45500,
+    "type": "expense",
+    "category": "Groceries",
+    "notes": "Supermarket",
+    "date": "2025-12-01T13:22:00.000Z",
+    "createdAt": "2025-12-01T13:22:00.000Z"
+  },
+  {
+    "id": "tx_003",
+    "userId": "user_123",
+    "amount": 400000,
+    "type": "debt",
+    "category": "Loan",
+    "notes": "Lent to Mark",
+    "date": "2025-10-05T09:00:00.000Z",
+    "createdAt": "2025-10-05T09:00:00.000Z"
+  },
+  {
+    "id": "tx_004",
+    "userId": "user_123",
+    "amount": 200000,
+    "type": "repayment",
+    "category": "Loan Repayment",
+    "notes": "Partial repayment from Mark",
+    "date": "2025-12-05T12:30:00.000Z",
+    "createdAt": "2025-12-05T12:30:00.000Z"
+  },
+  {
+    "id": "tx_005",
+    "userId": "user_123",
+    "amount": 120000,
+    "type": "income",
+    "category": "Freelance",
+    "notes": "Design gig",
+    "date": "2025-09-15T10:00:00.000Z",
+    "createdAt": "2025-09-15T10:00:00.000Z"
+  },
+  {
+    "id": "tx_006",
+    "userId": "user_123",
+    "amount": 80000,
+    "type": "expense",
+    "category": "Transport",
+    "notes": "Taxi and buses",
+    "date": "2025-11-10T07:00:00.000Z",
+    "createdAt": "2025-11-10T07:00:00.000Z"
+  }
+]
+

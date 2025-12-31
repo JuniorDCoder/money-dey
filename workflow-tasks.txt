@@ -1,0 +1,171 @@
+Step 0: Project Setup (already done)
+
+New Expo React Native project created
+
+Name of the app: Money Dey
+
+Step 1: Setup Constants & Basic Theme
+
+Prompt for Junie AI:
+
+Create a constants file for the Money Dey app:
+
+Name it constants/colors.js.
+
+Include the primary purple theme, plus complementary colors for background, text, and accents.
+
+Export all colors.
+
+Create a constants/images.js to store URLs for online images (for onboarding illustrations, icons).
+
+Make it reusable across the app.
+
+Use good naming conventions (e.g., PRIMARY_PURPLE, BACKGROUND_LIGHT, etc.).
+
+Step 2: Setup Navigation
+
+Prompt for Junie AI:
+
+Setup React Navigation in Money Dey:
+
+Install @react-navigation/native and related packages.
+
+Create a navigation/ folder with AppNavigator.js.
+
+Include stack navigation for authentication (login/signup) and main app screens (dashboard, transactions, recommendations, settings).
+
+Make navigation consistent and smooth for gestures.
+
+Setup a placeholder screen for each route with the screen name text.
+
+Step 3: Onboarding Screens
+
+Prompt for Junie AI:
+
+Build Onboarding screens for Money Dey:
+
+3–4 screens with purple-themed backgrounds and online images/icons.
+
+Include swipe gestures to move between screens.
+
+Smooth animations for transitions.
+
+Last screen should have a “Get Started” button navigating to Login/Sign Up.
+
+Use react-native-swipe-gestures or react-native-snap-carousel.
+
+Step 4: Authentication (Login / Signup)
+
+Prompt for Junie AI:
+
+Build Login and Signup screens for Money Dey:
+
+Use Firebase Auth (email/password) integration.
+
+Optional: social login buttons for Google/Apple.
+
+Include form validation (email format, password rules).
+
+After login/signup, navigate to Dashboard.
+
+Use purple theme and consistent styling.
+
+Step 5: Dashboard / Overview
+
+Prompt for Junie AI:
+
+Build the Dashboard screen:
+
+Show income vs. expenses chart (use react-native-chart-kit or similar).
+
+Display summary cards: Total Income, Expenses, Debts, Repayments.
+
+Pull sample data from a mock Firestore collection.
+
+Use purple-themed cards and smooth gestures.
+
+Step 6: Transaction Management
+
+Prompt for Junie AI:
+
+Build Add Transaction screen:
+
+Form to add income, expense, debt, repayment.
+
+Fields: Amount, Category, Date, Notes.
+
+Validate inputs.
+
+Save to Firestore.
+
+Build Transaction List screen:
+
+List all transactions with swipe gestures (swipe to edit/delete).
+
+Include visual indicators for income, expenses, debts.
+
+Include search/filter by type or date.
+
+Step 7: Financial Recommendations / Insights
+
+Prompt for Junie AI:
+
+Build Recommendations / Insights screen:
+
+Analyze sample data (total income, expenses, debts).
+
+Display tips like “Save more this month” or “Reduce debt by X amount.”
+
+Use cards or list with icons and purple accents.
+
+Smooth scroll and gestures for usability.
+
+Step 8: Settings Screen
+
+Prompt for Junie AI:
+
+Build Settings screen:
+
+Options: Profile info, Notifications (on/off), Theme (light/dark).
+
+Toggle push notifications via Firebase Cloud Messaging.
+
+Maintain purple theme and consistent styling.
+
+Step 9: Push Notifications
+
+Prompt for Junie AI:
+
+Integrate Push Notifications with Firebase Cloud Messaging:
+
+Notify users about upcoming bills, debt repayments, or recommendations.
+
+Include local notifications as fallback.
+
+Ensure app requests permission on iOS/Android.
+
+Trigger sample notifications on app startup for demo.
+
+Step 10: Polish & Animations
+
+Prompt for Junie AI:
+
+Add smooth animations across Money Dey:
+
+Screen transitions, chart loading animations, onboarding swipe gestures.
+
+Use Lottie or react-native-reanimated for visual polish.
+
+Ensure app is responsive on both iOS and Android.
+
+Include dark mode support.
+
+Step 11: Sample Data & Demo
+
+Prompt for Junie AI:
+
+Populate Firestore with sample data for demo purposes:
+
+Sample users, transactions, debts, repayments.
+
+Ensure dashboard, transaction list, and recommendations screens show realistic data.

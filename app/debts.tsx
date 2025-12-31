@@ -1,23 +1,31 @@
 import DebtCard from '@/components/debts/debt-card';
 import BottomTabs from '@/components/ui/bottom-tabs';
+import OfflineBanner from '@/components/ui/offline-banner';
 import Shimmer from '@/components/ui/shimmer';
+import SyncStatusIndicator from '@/components/ui/sync-status-indicator';
 import TopActions from '@/components/ui/top-actions';
 import * as C from '@/constants/colors';
+import { useDebtsWithQueue } from '@/hooks/use-debts-with-queue';
+import { useNetworkStatus } from '@/hooks/use-network-status';
+import { useOfflineSync } from '@/hooks/use-offline-sync';
 import { auth, db } from '@/lib/firebase';
 import { cancelScheduledNotification, requestNotificationPermissions, scheduleDebtReminder } from '@/lib/notifications';
+import { OfflineDebtService } from '@/lib/offline-debt-service';
+import { OfflineTransactionService } from '@/lib/offline-transaction-service';
 import { Debt } from '@/types/models';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useRouter } from 'expo-router';
-import { addDoc, collection, doc, getDocs, onSnapshot, query, serverTimestamp, updateDoc, where } from 'firebase/firestore';
-import React, { useEffect, useState } from 'react';
+import { addDoc, collection, doc, serverTimestamp, updateDoc } from 'firebase/firestore';
+import React, { useState } from 'react';
 import { Alert, FlatList, Modal, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Toast from 'react-native-toast-message';
 
 export default function Debts() {
   const router = useRouter();
-  const [debts, setDebts] = useState<Debt[]>([]);
-  const [loading, setLoading] = useState(true);
+  const networkStatus = useNetworkStatus();
+  const syncState = useOfflineSync();
+  const { debts, loading } = useDebtsWithQueue();
   const [reminderModal, setReminderModal] = useState(false);
   const [selectedDebt, setSelectedDebt] = useState<Debt | null>(null);
   const [reminderDateTime, setReminderDateTime] = useState(new Date());
@@ -25,34 +33,6 @@ export default function Debts() {
   const [showTimePicker, setShowTimePicker] = useState(false);
   const [settlingId, setSettlingId] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
-
-  useEffect(() => {
-    const uid = auth.currentUser?.uid;
-    if (!uid) {
-      Toast.show({ type: 'error', text1: 'Not signed in', text2: 'Please sign in to view your debts.' });
-      router.replace('/auth/login');
-      return;
-    }
-
-    const q = query(collection(db, 'debts'), where('ownerId', '==', uid));
-    const unsub = onSnapshot(q, (snap) => {
-      const items: Debt[] = [];
-      snap.forEach((d) => {
-        const data = d.data();
-        items.push({ id: d.id, ...(data as any) });
-      });
-      setDebts(items);
-      setLoading(false);
-      setRefreshing(false);
-    }, (err) => {
-      console.log('Debts snapshot error', err);
-      Toast.show({ type: 'error', text1: 'Could not load debts', text2: 'Try again later.' });
-      setLoading(false);
-      setRefreshing(false);
-    });
-
-    return () => unsub();
-  }, [router]);
 
   const handleRemind = (d: Debt) => {
     setSelectedDebt(d);
@@ -152,50 +132,47 @@ export default function Debts() {
 
     setSettlingId(d.id);
     try {
-      // Log repayment record
-      const repaymentRef = await addDoc(collection(db, 'repayments'), {
-        userId: uid,
+      const nowIso = new Date().toISOString();
+
+      // Create repayment record (offline-friendly)
+      const repaymentId = await OfflineDebtService.addRepayment({
         debtId: d.id,
         amount: remaining,
-        date: new Date().toISOString(),
+        date: nowIso,
         counterpartyName: d.counterpartyName,
         direction: d.direction,
         previousBalance: remaining,
         newBalance: 0,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
+        notes: `Settled debt with ${d.counterpartyName}`,
       });
 
-      // Record repayment transaction
-      await addDoc(collection(db, 'transactions'), {
-        userId: uid,
+      // Log repayment transaction with offline support
+      await OfflineTransactionService.addTransaction({
         type: 'repayment',
         amount: remaining,
         category: 'Debt settlement',
-        date: new Date().toISOString(),
+        date: nowIso,
         notes: `Settled debt with ${d.counterpartyName}`,
         debtId: d.id,
         direction: d.direction,
         counterpartyName: d.counterpartyName,
-        createdAt: serverTimestamp(),
-        repaymentId: repaymentRef.id,
       });
 
-      // Cancel any scheduled reminder for this debt
+      // Cancel any scheduled reminder for this debt (local only)
       if ((d as any).notificationId) {
         try { await cancelScheduledNotification((d as any).notificationId as string); } catch {}
       }
 
-      // Update debt
-      await updateDoc(doc(db, 'debts', d.id), {
+      // Update debt balance/status with offline support
+      await OfflineDebtService.updateDebt(d.id, {
         remainingAmount: 0,
         status: 'paid',
         reminderAt: null,
         notificationId: null,
-        updatedAt: serverTimestamp(),
+        updatedAt: nowIso,
       });
 
-      Toast.show({ type: 'success', text1: 'Debt settled', text2: 'Marked as fully repaid.' });
+      Toast.show({ type: 'success', text1: 'Debt settled', text2: 'Marked as fully repaid (will sync if offline).' });
     } catch (e) {
       console.log('Settle debt error', e);
       Toast.show({ type: 'error', text1: 'Settle failed', text2: 'Could not settle debt. Try again.' });
@@ -217,6 +194,10 @@ export default function Debts() {
 
   return (
     <SafeAreaView style={styles.container}>
+      <OfflineBanner isOnline={networkStatus.isOnline} isSyncing={syncState.isSyncing} pendingCount={syncState.pendingCount} />
+      <View style={{ position: 'absolute', top: 36, right: 16, zIndex: 10 }}>
+        <SyncStatusIndicator isOnline={networkStatus.isOnline} isSyncing={syncState.isSyncing} hasFailures={syncState.failedCount > 0} />
+      </View>
       <TopActions />
       <View style={styles.header}>
         <View style={styles.headerRow}>
@@ -284,19 +265,7 @@ export default function Debts() {
             contentContainerStyle={{ paddingBottom: 140 }}
             refreshControl={<RefreshControl refreshing={refreshing} onRefresh={async () => {
               setRefreshing(true);
-              const uid = auth.currentUser?.uid;
-              if (!uid) { setRefreshing(false); return; }
-              try {
-                const q = query(collection(db, 'debts'), where('ownerId', '==', uid));
-                const snap = await getDocs(q);
-                const items: Debt[] = snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
-                setDebts(items);
-              } catch (e) {
-                console.log('Refresh debts error', e);
-                Toast.show({ type: 'error', text1: 'Refresh failed', text2: 'Pull to refresh again.' });
-              } finally {
-                setRefreshing(false);
-              }
+              setTimeout(() => setRefreshing(false), 600);
             }} />}
           />
         )}

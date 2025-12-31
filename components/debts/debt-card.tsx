@@ -26,11 +26,18 @@ export default function DebtCard({ debt, onRemind, onSettle }: Props) {
       <View style={styles.left}>
         <View style={styles.headerRow}>
           <Text style={styles.title}>{debt.direction === 'owed' ? 'They owe you' : 'You owe'}</Text>
-          {debt.status && (
-            <Text style={[styles.statusBadge, { backgroundColor: statusColor }]}>
-              {debt.status}
-            </Text>
-          )}
+          <View style={{ flexDirection: 'row', gap: 6, alignItems: 'center' }}>
+            {!(debt as any).synced && (
+              <View style={{ backgroundColor: '#FCD34D', paddingVertical: 2, paddingHorizontal: 6, borderRadius: 6 }}>
+                <Text style={{ fontSize: 9, fontWeight: '700', color: '#92400E' }}>Pending</Text>
+              </View>
+            )}
+            {debt.status && (
+              <Text style={[styles.statusBadge, { backgroundColor: statusColor }]}>
+                {debt.status}
+              </Text>
+            )}
+          </View>
         </View>
         <Text style={styles.name}>{debt.counterpartyName}</Text>
         <Text style={styles.subtitle}>{subtitle}</Text>

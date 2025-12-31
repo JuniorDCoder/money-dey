@@ -1,11 +1,15 @@
 import BottomTabs from '@/components/ui/bottom-tabs';
 import Shimmer from '@/components/ui/shimmer';
 import * as C from '@/constants/colors';
+import { useNetworkStatus } from '@/hooks/use-network-status';
 import { auth, db } from '@/lib/firebase';
+import { OfflineDebtService } from '@/lib/offline-debt-service';
+import { OfflineQueue } from '@/lib/offline-queue';
+import { OfflineTransactionService } from '@/lib/offline-transaction-service';
 import { Debt, Repayment, Transaction } from '@/types/models';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { addDoc, collection, doc, getDoc, getDocs, query, serverTimestamp, updateDoc, where } from 'firebase/firestore';
+import { collection, doc, getDoc, getDocs, query, updateDoc, where } from 'firebase/firestore';
 import React, { useEffect, useState } from 'react';
 import {
     ActivityIndicator,
@@ -28,6 +32,7 @@ export default function AddTransaction() {
     const router = useRouter();
     const params = useLocalSearchParams() as Params;
     const editingId = params?.id;
+    const { isOnline } = useNetworkStatus();
 
   const [amount, setAmount] = useState('');
   const [category, setCategory] = useState('');
@@ -90,8 +95,6 @@ export default function AddTransaction() {
                 } catch {}
             }
           }
-                } else {
-                    Toast.show({ type: 'error', text1: 'Not found', text2: 'Transaction not found.' });
                 }
             } catch (e) {
                 console.log('Load tx', e);
@@ -189,9 +192,11 @@ export default function AddTransaction() {
 
         setLoading(true);
         try {
+            const preferQueue = !isOnline;
             const sanitize = (obj: Record<string, any>) => Object.fromEntries(Object.entries(obj).filter(([, v]) => v !== undefined));
             const parsedDue = dueDate ? new Date(dueDate) : null;
             const dueIso = parsedDue && !isNaN(parsedDue.getTime()) ? parsedDue.toISOString() : null;
+            const nowIso = new Date().toISOString();
 
             const basePayload: Partial<Transaction> = {
                 userId: uid,
@@ -203,7 +208,9 @@ export default function AddTransaction() {
             };
 
             if (!editingId) {
-                (basePayload as any).createdAt = serverTimestamp();
+                (basePayload as any).createdAt = nowIso;
+            } else {
+                (basePayload as any).updatedAt = nowIso;
             }
 
             // Handle repayment type
@@ -221,62 +228,129 @@ export default function AddTransaction() {
                 const newBalance = Math.max(0, previousBalance - repayAmount);
                 const newStatus: 'pending' | 'partial' | 'paid' = newBalance === 0 ? 'paid' : (previousBalance === debt.amount ? 'partial' : debt.status || 'partial');
 
-                (basePayload as any).counterpartyName = debt.counterpartyName;
-                (basePayload as any).direction = debt.direction;
-                (basePayload as any).debtId = debt.id;
-                (basePayload as any).previousBalance = previousBalance;
-                (basePayload as any).newBalance = newBalance;
+                const repaymentPayload: Partial<Repayment> = {
+                    userId: uid,
+                    debtId: debt.id,
+                    amount: repayAmount,
+                    date: date.toISOString(),
+                    notes,
+                    counterpartyName: debt.counterpartyName,
+                    direction: debt.direction,
+                    previousBalance,
+                    newBalance,
+                };
 
                 if (editingId) {
-                    // Editing existing repayment
-                    await updateDoc(doc(db, 'transactions', editingId), sanitize({
-                        ...basePayload,
-                        updatedAt: serverTimestamp() as any
-                    }));
+                    // Editing existing repayment with offline-friendly updates
+                    if (preferQueue) {
+                        await OfflineQueue.addOperation('update', 'transactions', editingId, sanitize({
+                            ...basePayload,
+                            counterpartyName: debt.counterpartyName,
+                            direction: debt.direction,
+                            debtId: debt.id,
+                            previousBalance,
+                            newBalance,
+                        }));
+                    } else {
+                        await OfflineTransactionService.updateTransaction(editingId, sanitize({
+                            ...basePayload,
+                            counterpartyName: debt.counterpartyName,
+                            direction: debt.direction,
+                            debtId: debt.id,
+                            previousBalance,
+                            newBalance,
+                        }));
+                    }
 
-                    // Update or create corresponding repayment record
                     const repaymentSnap = await getDocs(query(collection(db, 'repayments'), where('transactionId', '==', editingId)));
                     if (!repaymentSnap.empty) {
                         const repaymentDoc = repaymentSnap.docs[0];
-                        await updateDoc(doc(db, 'repayments', repaymentDoc.id), {
+                        const updateData = {
                             amount: repayAmount,
                             date: date.toISOString(),
                             notes,
-                            updatedAt: serverTimestamp(),
+                            updatedAt: nowIso,
+                        };
+                        if (preferQueue) {
+                            await OfflineQueue.addOperation('update', 'repayments', repaymentDoc.id, updateData);
+                        } else {
+                            try {
+                                await updateDoc(doc(db, 'repayments', repaymentDoc.id), updateData);
+                            } catch (err) {
+                                await OfflineQueue.addOperation('update', 'repayments', repaymentDoc.id, updateData);
+                            }
+                        }
+                    }
+
+                    if (preferQueue) {
+                        await OfflineQueue.addOperation('update', 'debts', debt.id, {
+                            remainingAmount: newBalance,
+                            status: newStatus,
+                            updatedAt: nowIso,
+                        });
+                    } else {
+                        await OfflineDebtService.updateDebt(debt.id, {
+                            remainingAmount: newBalance,
+                            status: newStatus,
+                            updatedAt: nowIso,
                         });
                     }
 
-                    Toast.show({ type: 'success', text1: 'Updated', text2: 'Repayment updated successfully.' });
+                    Toast.show({ type: 'success', text1: 'Updated', text2: 'Repayment saved (syncs offline).' });
                 } else {
                     // Creating new repayment
-                    const txRef = await addDoc(collection(db, 'transactions'), sanitize(basePayload) as any);
+                    const repaymentId = preferQueue
+                        ? await OfflineQueue.addOperation('create', 'repayments', `temp_${Date.now()}`, repaymentPayload)
+                        : await OfflineDebtService.addRepayment(repaymentPayload);
 
-                    // Create repayment record
-                    const repaymentPayload: Partial<Repayment> = {
-                        userId: uid,
-                        debtId: debt.id,
-                        transactionId: txRef.id,
-                        amount: repayAmount,
-                        date: date.toISOString(),
-                        notes,
-                        counterpartyName: debt.counterpartyName,
-                        direction: debt.direction,
-                        previousBalance,
-                        newBalance,
-                        createdAt: serverTimestamp() as any,
-                    };
-                    await addDoc(collection(db, 'repayments'), sanitize(repaymentPayload) as any);
+                    const txId = preferQueue
+                        ? await OfflineQueue.addOperation('create', 'transactions', `temp_${Date.now()}`, sanitize({
+                            ...basePayload,
+                            counterpartyName: debt.counterpartyName,
+                            direction: debt.direction,
+                            debtId: debt.id,
+                            previousBalance,
+                            newBalance,
+                            repaymentId,
+                        }))
+                        : await OfflineTransactionService.addTransaction(sanitize({
+                            ...basePayload,
+                            counterpartyName: debt.counterpartyName,
+                            direction: debt.direction,
+                            debtId: debt.id,
+                            previousBalance,
+                            newBalance,
+                            repaymentId,
+                        }));
 
-                    // Update debt with new balance and status
-                    await updateDoc(doc(db, 'debts', debt.id), {
-                        remainingAmount: newBalance,
-                        status: newStatus,
-                        updatedAt: serverTimestamp(),
-                    });
+                    // Optionally link repayment back to transaction if we have a real id
+                    if (repaymentId && txId && !preferQueue) {
+                        const updateData = { transactionId: txId, updatedAt: nowIso };
+                        try {
+                            await updateDoc(doc(db, 'repayments', repaymentId), updateData);
+                        } catch (err) {
+                            await OfflineQueue.addOperation('update', 'repayments', repaymentId, updateData);
+                        }
+                    }
 
-                    Toast.show({ type: 'success', text1: 'Repayment recorded', text2: `Debt balance: ${newBalance.toLocaleString()} XAF` });
+                    if (preferQueue) {
+                        await OfflineQueue.addOperation('update', 'debts', debt.id, {
+                            remainingAmount: newBalance,
+                            status: newStatus,
+                            updatedAt: nowIso,
+                        });
+                    } else {
+                        await OfflineDebtService.updateDebt(debt.id, {
+                            remainingAmount: newBalance,
+                            status: newStatus,
+                            updatedAt: nowIso,
+                        });
+                    }
+
+                    Toast.show({ type: 'success', text1: 'Repayment recorded', text2: `Debt balance: ${newBalance.toLocaleString()} XAF (syncs offline).` });
                 }
 
+                setLoading(false);
                 router.back();
                 return;
             }
@@ -301,49 +375,78 @@ export default function AddTransaction() {
                 status: 'pending',
                 dueDate: dueIso,
                 notes,
-                updatedAt: serverTimestamp(),
+                updatedAt: nowIso,
             } : null;
 
             if (type === 'debt' && editingId) {
                 // ensure debt exists or create one, then update both records
                 let nextDebtId = debtId;
                 if (nextDebtId) {
-                    await updateDoc(doc(db, 'debts', nextDebtId), debtPayload as any);
+                    if (preferQueue) {
+                        await OfflineQueue.addOperation('update', 'debts', nextDebtId, debtPayload as any);
+                    } else {
+                        await OfflineDebtService.updateDebt(nextDebtId, debtPayload as any);
+                    }
                 } else {
-                    const created = await addDoc(collection(db, 'debts'), { ...debtPayload, createdAt: serverTimestamp() });
-                    nextDebtId = created.id;
+                    if (preferQueue) {
+                        nextDebtId = await OfflineQueue.addOperation('create', 'debts', `temp_${Date.now()}`, { ...debtPayload });
+                    } else {
+                        nextDebtId = await OfflineDebtService.addDebt({ ...debtPayload });
+                    }
                     setDebtId(nextDebtId);
                 }
 
-                await updateDoc(doc(db, 'transactions', editingId), sanitize({
-                    ...basePayload,
-                    debtId: nextDebtId,
-                    updatedAt: serverTimestamp() as any
-                }));
-                Toast.show({ type: 'success', text1: 'Updated', text2: 'Transaction updated successfully.' });
+                if (preferQueue) {
+                    await OfflineQueue.addOperation('update', 'transactions', editingId, sanitize({
+                        ...basePayload,
+                        debtId: nextDebtId,
+                    }));
+                } else {
+                    await OfflineTransactionService.updateTransaction(editingId, sanitize({
+                        ...basePayload,
+                        debtId: nextDebtId,
+                    }));
+                }
+                Toast.show({ type: 'success', text1: 'Updated', text2: 'Transaction updated (syncs offline).' });
             } else if (type === 'debt' && !editingId) {
                 // create debt first, then transaction referencing it
-                const createdDebt = await addDoc(collection(db, 'debts'), { ...debtPayload, createdAt: serverTimestamp() });
-                const debtRefId = createdDebt.id;
-                await addDoc(collection(db, 'transactions'), sanitize({ ...basePayload, debtId: debtRefId }) as any);
-                Toast.show({ type: 'success', text1: 'Saved', text2: 'Transaction added successfully.' });
-                Toast.show({ type: 'success', text1: 'Debt saved', text2: 'Debt record created successfully.' });
+                const debtRefId = preferQueue
+                    ? await OfflineQueue.addOperation('create', 'debts', `temp_${Date.now()}`, { ...debtPayload })
+                    : await OfflineDebtService.addDebt({ ...debtPayload });
+                if (preferQueue) {
+                    await OfflineQueue.addOperation('create', 'transactions', `temp_${Date.now()}`, sanitize({ ...basePayload, debtId: debtRefId }));
+                } else {
+                    await OfflineTransactionService.addTransaction(sanitize({ ...basePayload, debtId: debtRefId }));
+                }
+                Toast.show({ type: 'success', text1: 'Saved', text2: 'Transaction added (offline-ready).' });
+                Toast.show({ type: 'success', text1: 'Debt saved', text2: 'Debt record created (offline-ready).' });
             } else {
                 // non-debt path
                 if (editingId) {
-                    await updateDoc(doc(db, 'transactions', editingId), sanitize({
-                        ...basePayload,
-                        debtId: null,
-                        updatedAt: serverTimestamp() as any
-                    }));
-                    Toast.show({ type: 'success', text1: 'Updated', text2: 'Transaction updated successfully.' });
+                    if (preferQueue) {
+                        await OfflineQueue.addOperation('update', 'transactions', editingId, sanitize({
+                            ...basePayload,
+                            debtId: null,
+                        }));
+                    } else {
+                        await OfflineTransactionService.updateTransaction(editingId, sanitize({
+                            ...basePayload,
+                            debtId: null,
+                        }));
+                    }
+                    Toast.show({ type: 'success', text1: 'Updated', text2: 'Transaction updated (syncs offline).' });
                 } else {
-                    await addDoc(collection(db, 'transactions'), sanitize({ ...basePayload, debtId: null }) as any);
-                    Toast.show({ type: 'success', text1: 'Saved', text2: 'Transaction added successfully.' });
+                    if (preferQueue) {
+                        await OfflineQueue.addOperation('create', 'transactions', `temp_${Date.now()}`, sanitize({ ...basePayload, debtId: null }));
+                    } else {
+                        await OfflineTransactionService.addTransaction(sanitize({ ...basePayload, debtId: null }));
+                    }
+                    Toast.show({ type: 'success', text1: 'Saved', text2: 'Transaction added (offline-ready).' });
                 }
             }
 
-            router.back();
+            setLoading(false);
+            router.push('/transactions');
         } catch (e: any) {
             console.log('Save tx', e);
             Toast.show({

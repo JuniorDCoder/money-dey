@@ -2,11 +2,12 @@ import BottomTabs from '@/components/ui/bottom-tabs';
 import Shimmer from '@/components/ui/shimmer';
 import TopActions from '@/components/ui/top-actions';
 import * as C from '@/constants/colors';
+import { useTransactionsWithQueue } from '@/hooks/use-transactions-with-queue';
 import { auth, db } from '@/lib/firebase';
 import { Transaction } from '@/types/models';
 import { useRouter } from 'expo-router';
-import { collection, deleteDoc, doc, getDoc, getDocs, onSnapshot, orderBy, query, updateDoc, where } from 'firebase/firestore';
-import React, { useEffect, useMemo, useState } from 'react';
+import { collection, deleteDoc, doc, getDoc, getDocs, query, updateDoc, where } from 'firebase/firestore';
+import React, { useMemo, useState } from 'react';
 import { FlatList, Pressable, RefreshControl, StyleSheet, Text, TextInput, View } from 'react-native';
 import { GestureHandlerRootView, Swipeable } from 'react-native-gesture-handler';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -14,96 +15,33 @@ import Toast from 'react-native-toast-message';
 
 export default function Transactions() {
   const router = useRouter();
-  const [transactions, setTransactions] = useState<Transaction[]>([]);
-  const [loading, setLoading] = useState(true);
+  const currentUid = auth?.currentUser?.uid;
+  const useMock = !currentUid; // use mock when not signed-in
+  const effectiveUserId = useMock ? undefined : currentUid;
+  
+  const { transactions, loading, aggregates, refetch } = useTransactionsWithQueue({ userId: effectiveUserId, useMock });
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<'all' | Transaction['type']>('all');
+  
+  
   const [refreshing, setRefreshing] = useState(false);
-
-  useEffect(() => {
-    const uid = auth.currentUser?.uid;
-    if (!uid) {
-      // User not signed in — keep mock data
-      setLoading(false);
-      return;
-    }
-
-    setLoading(true);
-    const q = query(collection(db, 'transactions'), where('userId', '==', uid), orderBy('date', 'desc'));
-    const unsub = onSnapshot(q, (snap) => {
-      (async () => {
-        const items: Transaction[] = [];
-        const debtIds = new Set<string>();
-        snap.forEach((d) => {
-          const data = d.data() as any;
-          const debtId = data.debtId || data.debt_id;
-          if (debtId) debtIds.add(String(debtId));
-          items.push({
-            id: d.id,
-            amount: typeof data.amount === 'number' ? data.amount : Number(data.amount || 0),
-            type: data.type || 'expense',
-            category: data.category || 'Misc',
-            notes: data.notes || data.note || '',
-            date: data.date && data.date.toDate ? data.date.toDate().toISOString() : (data.date ? new Date(data.date).toISOString() : new Date().toISOString()),
-            createdAt: data.createdAt || null,
-            counterpartyName: data.counterpartyName || data.counterparty || undefined,
-            debtId,
-            direction: data.direction,
-          } as Transaction);
-        });
-
-        let debtMap: Record<string, any> = {};
-        if (debtIds.size) {
-          const results = await Promise.all(Array.from(debtIds).map(async (id) => {
-            try {
-              const ds = await getDoc(doc(db, 'debts', id));
-              return ds.exists() ? { id, data: ds.data() } : null;
-            } catch {
-              return null;
-            }
-          }));
-          debtMap = results.filter(Boolean).reduce((acc, entry: any) => {
-            acc[entry.id] = entry.data;
-            return acc;
-          }, {} as Record<string, any>);
-        }
-
-        const merged = items.map((t) => {
-          const debt = t.debtId ? debtMap[t.debtId] : null;
-          if (debt) {
-            return {
-              ...t,
-              counterpartyName: debt.counterpartyName || t.counterpartyName,
-              direction: debt.direction || t.direction,
-              category: t.category || 'Debt',
-            } as Transaction;
-          }
-          return t;
-        });
-
-        setTransactions(merged);
-        setLoading(false);
-      })();
-    }, (err) => {
-      console.log('Tx snapshot err', err);
-      Toast.show({ type: 'error', text1: 'Could not load', text2: 'Unable to load transactions.' });
-      setLoading(false);
-    });
-
-    return () => unsub();
-  }, []);
 
   const filtered = useMemo(() => {
     let list = transactions;
     if (filter !== 'all') list = list.filter((t) => t.type === filter);
     if (search) list = list.filter((t) => (t.category || t.notes || t.type).toLowerCase().includes(search.toLowerCase()) || t.amount.toString().includes(search));
     return list;
+
   }, [transactions, filter, search]);
 
   const onRefresh = async () => {
-    setRefreshing(true);
-    // Firestore onSnapshot updates live; just briefly toggle to show UI feedback
-    setTimeout(() => setRefreshing(false), 600);
+    try {
+      setRefreshing(true);
+      await refetch();
+    } finally {
+      setRefreshing(false);
+    }
+  
   };
 
   const handleDelete = async (item?: Transaction) => {
@@ -179,6 +117,9 @@ export default function Transactions() {
       console.log('Delete tx', e);
       Toast.show({ type: 'error', text1: 'Could not delete', text2: 'Try again.' });
     }
+
+    await refetch();
+
   };
 
   const renderRightActions = (item: Transaction) => (
@@ -203,7 +144,14 @@ export default function Transactions() {
         <Pressable onPress={() => router.push(`/transactions/${item.id}`)}>
           <View style={styles.txRow}>
             <View style={{ flex: 1 }}>
-              <Text style={styles.txCategory}>{(item.type === 'debt' || item.type === 'repayment') ? (item.counterpartyName || 'Debt') : (item.category || item.type)}</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <Text style={styles.txCategory}>{(item.type === 'debt' || item.type === 'repayment') ? (item.counterpartyName || 'Debt') : (item.category || item.type)}</Text>
+                {!(item as any).synced && (
+                  <View style={{ backgroundColor: '#FCD34D', paddingVertical: 2, paddingHorizontal: 6, borderRadius: 6 }}>
+                    <Text style={{ fontSize: 9, fontWeight: '700', color: '#92400E' }}>Pending</Text>
+                  </View>
+                )}
+              </View>
               <Text style={styles.txNotes}>{item.notes || ''}</Text>
               
               {isRepayment && previousBalance !== undefined && newBalance !== undefined && (

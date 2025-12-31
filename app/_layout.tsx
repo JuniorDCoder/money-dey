@@ -7,7 +7,10 @@ import 'react-native-reanimated';
 import Toast from 'react-native-toast-message';
 
 import { useColorScheme } from '@/hooks/use-color-scheme';
+import { useNetworkStatus } from '@/hooks/use-network-status';
+import { useOfflineSync } from '@/hooks/use-offline-sync';
 import { androidExpoGoBlockedPush, requestNotificationPermissions } from '@/lib/notifications';
+import { SyncService } from '@/lib/sync-service';
 
 // Configure notifications only if available (SDK 53+ requires development build for remote notifications)
 let Notifications: any;
@@ -28,6 +31,10 @@ try {
 
 export default function RootLayout() {
     const colorScheme = useColorScheme();
+   const networkStatus = useNetworkStatus();
+   const syncState = useOfflineSync(async (ops) => {
+       await SyncService.syncOperations();
+   });
 
     useEffect(() => {
         const setupNotifications = async () => {

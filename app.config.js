@@ -1,6 +1,6 @@
 module.exports = {
   "expo": {
-    "name": "money-dey",
+    "name": "Money Dey",
     "slug": "money-dey",
     "version": "1.0.0",
     "orientation": "portrait",

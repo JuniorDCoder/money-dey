@@ -1,17 +1,22 @@
 import SummaryPieChart from '@/components/charts/summary-pie-chart';
 import BottomTabs from '@/components/ui/bottom-tabs';
+import OfflineBanner from '@/components/ui/offline-banner';
 import Shimmer from '@/components/ui/shimmer';
 import SummaryCard from '@/components/ui/summary-card';
+import SyncStatusIndicator from '@/components/ui/sync-status-indicator';
 import TopActions from '@/components/ui/top-actions';
 import * as C from '@/constants/colors';
-import { useTransactions } from '@/hooks/use-transactions';
+import { useNetworkStatus } from '@/hooks/use-network-status';
+import { useOfflineSync } from '@/hooks/use-offline-sync';
+import { useTransactionsWithQueue } from '@/hooks/use-transactions-with-queue';
 import { auth, db } from '@/lib/firebase';
 import { Debt, Repayment, Transaction, UserProfile } from '@/types/models';
-import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
+import * as SecureStore from 'expo-secure-store';
 import { collection, deleteDoc, doc, getDoc, onSnapshot, query, where } from 'firebase/firestore';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Animated, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Animated, Modal, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Swipeable } from 'react-native-gesture-handler';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Toast from 'react-native-toast-message';
@@ -23,8 +28,12 @@ export default function Dashboard() {
     const useMock = !currentUid; // use mock when not signed-in
     const effectiveUserId = useMock ? undefined : currentUid;
 
-    const { transactions, loading, aggregates, refetch } = useTransactions({ userId: effectiveUserId, useMock });
+    const { transactions, loading, aggregates, refetch } = useTransactionsWithQueue({ userId: effectiveUserId, useMock });
     const [refreshing, setRefreshing] = useState(false);
+
+    // Network and sync state
+    const networkStatus = useNetworkStatus();
+    const syncState = useOfflineSync();
 
     const [debts, setDebts] = useState<Debt[]>([]);
     const [repayments, setRepayments] = useState<Repayment[]>([]);
@@ -36,6 +45,19 @@ export default function Dashboard() {
 
     // User display name
     const [displayName, setDisplayName] = useState<string | null>(auth?.currentUser?.displayName || null);
+
+    // Feature tour state
+    const [showFeatureTour, setShowFeatureTour] = useState(false);
+    const [currentTourStep, setCurrentTourStep] = useState(0);
+    const tourOpacity = useRef(new Animated.Value(0)).current;
+
+    const featureSteps = [
+        { title: 'Welcome! 👋', description: 'See your income, expenses, and financial overview at a glance.' },
+        { title: 'Offline support', description: 'Keep working without internet — changes queue locally and sync automatically when you reconnect.', icon: 'cloud-off' },
+        { title: 'Add Transactions', description: 'Track every transaction — income, expenses, and debts right from here.', icon: 'plus-circle' },
+        { title: 'Get Recommendations', description: 'AI-powered tips to help you make smarter financial decisions.', icon: 'lightbulb' },
+        { title: 'View All Transactions', description: 'Access detailed transaction history and manage your finances.', icon: 'history' },
+    ];
 
     useEffect(() => {
         Animated.sequence([
@@ -56,7 +78,52 @@ export default function Dashboard() {
                 useNativeDriver: false // Changed to false for better text rendering
             }),
         ]).start();
+
+        // Show feature tour only on first dashboard visit
+        checkFirstDashboardVisit();
     }, [headerAnim, cardsAnim, txAnim]);
+
+    const checkFirstDashboardVisit = async () => {
+        try {
+            const visited = await SecureStore.getItemAsync('dashboard_visited');
+            if (!visited) {
+                await SecureStore.setItemAsync('dashboard_visited', 'true');
+                setTimeout(() => {
+                    setShowFeatureTour(true);
+                    animateTourIn();
+                }, 1200);
+            }
+        } catch (e) {
+            console.log('Failed to check dashboard visit', e);
+        }
+    };
+
+    const animateTourIn = () => {
+        Animated.timing(tourOpacity, {
+            toValue: 1,
+            duration: 500,
+            useNativeDriver: true
+        }).start();
+    };
+
+    const handleNextTourStep = () => {
+        if (currentTourStep < featureSteps.length - 1) {
+            setCurrentTourStep(currentTourStep + 1);
+        } else {
+            closeTourWithAnimation();
+        }
+    };
+
+    const closeTourWithAnimation = () => {
+        Animated.timing(tourOpacity, {
+            toValue: 0,
+            duration: 300,
+            useNativeDriver: true
+        }).start(() => {
+            setShowFeatureTour(false);
+            setCurrentTourStep(0);
+        });
+    };
 
     // Try to load user profile from Firestore for nicer name
     useEffect(() => {
@@ -168,6 +235,14 @@ export default function Dashboard() {
         });
     }, []);
 
+    // Calculate available balance: income - expenses - debt_owed + repayments_made
+    const availableBalance = useMemo(() => {
+        const income = Number(aggregates.income || 0);
+        const expenses = Number(aggregates.expense || 0);
+        const owing = debtSummary.owing;
+        return income - expenses - owing;
+    }, [aggregates.income, aggregates.expense, debtSummary.owing]);
+
     const analyticsData = useMemo(() => {
         // Colors aligned with SummaryCard rows
         return [
@@ -190,9 +265,14 @@ export default function Dashboard() {
 
     return (
         <SafeAreaView style={styles.container}>
+            <OfflineBanner
+                isOnline={networkStatus.isOnline}
+                isSyncing={syncState.isSyncing}
+                pendingCount={syncState.pendingCount}
+            />
             <TopActions />
             <ScrollView
-                contentContainerStyle={{ paddingBottom: 120, paddingTop: 40, paddingHorizontal: 20 }}
+                contentContainerStyle={{ paddingBottom: 120, paddingTop: 10, paddingHorizontal: 20 }}
                 showsVerticalScrollIndicator={false}
                 refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={C.PRIMARY_PURPLE} colors={[C.PRIMARY_PURPLE]} />}
             >
@@ -200,8 +280,37 @@ export default function Dashboard() {
                     <Shimmer height={96} borderRadius={20} />
                 ) : (
                     <Animated.View style={[styles.headerCard, { opacity: headerAnim, transform: [{ translateY: headerAnim.interpolate({ inputRange: [0, 1], outputRange: [10, 0] }) }] }] }>
-                        <Text style={styles.title}>Welcome {displayName ? `${displayName} 👋` : '👋'}</Text>
-                        <Text style={styles.subtitle}>A smart view of your finances — income vs expenses</Text>
+                        <View style={styles.headerTitleRow}>
+                            <View style={{ flex: 1 }}>
+                                <Text style={styles.title}>Welcome {displayName ? `${displayName} 👋` : '👋'}</Text>
+                                <Text style={styles.subtitle}>A smart view of your finances</Text>
+                            </View>
+                            <SyncStatusIndicator
+                                isOnline={networkStatus.isOnline}
+                                isSyncing={syncState.isSyncing}
+                                hasFailures={syncState.failedCount > 0}
+                            />
+                        </View>
+                    </Animated.View>
+                )}
+
+                {/* Available Balance Card */}
+                {!loading && (
+                    <Animated.View style={[styles.balanceCard, { opacity: cardsAnim }]}>
+                        <View style={styles.balanceHeader}>
+                            <Text style={styles.balanceLabel}>Available Balance</Text>
+                            <MaterialCommunityIcons name="wallet" size={20} color={C.PRIMARY_PURPLE} />
+                        </View>
+                        <Text style={styles.balanceAmount}>
+                            {new Intl.NumberFormat(undefined, {
+                                style: 'currency',
+                                currency: 'XAF',
+                                maximumFractionDigits: 0
+                            }).format(Math.max(0, availableBalance))}
+                        </Text>
+                        <Text style={[styles.balanceNote, { color: availableBalance >= 0 ? '#10B981' : '#EF4444' }]}>
+                            {availableBalance >= 0 ? '✓ Good standing' : '⚠ Negative balance'}
+                        </Text>
                     </Animated.View>
                 )}
 
@@ -318,6 +427,54 @@ export default function Dashboard() {
             </Pressable>
             {/* Bottom navigation stays on top of content */}
             <BottomTabs />
+
+            {/* Feature Tour Modal */}
+            <Modal visible={showFeatureTour} transparent animationType="none">
+                <Animated.View style={[styles.tourOverlay, { opacity: tourOpacity }]}>
+                    <View style={styles.blurContainer} />
+                    <View style={styles.tourContent}>
+                        <Pressable onPress={closeTourWithAnimation} style={styles.closeButton}>
+                            <Ionicons name="close" size={24} color="#fff" />
+                        </Pressable>
+
+                        <View style={styles.tourCard}>
+                            {featureSteps[currentTourStep].icon && (
+                                <View style={styles.tourIconContainer}>
+                                    <MaterialCommunityIcons 
+                                        name={featureSteps[currentTourStep].icon as any} 
+                                        size={48} 
+                                        color={C.PRIMARY_PURPLE} 
+                                    />
+                                </View>
+                            )}
+                            <Text style={styles.tourTitle}>{featureSteps[currentTourStep].title}</Text>
+                            <Text style={styles.tourDescription}>{featureSteps[currentTourStep].description}</Text>
+
+                            {/* Progress dots */}
+                            <View style={styles.tourDots}>
+                                {featureSteps.map((_, idx) => (
+                                    <View
+                                        key={idx}
+                                        style={[
+                                            styles.tourDot,
+                                            idx === currentTourStep ? styles.tourDotActive : {}
+                                        ]}
+                                    />
+                                ))}
+                            </View>
+
+                            <Pressable 
+                                onPress={handleNextTourStep}
+                                style={[styles.tourButton, { backgroundColor: C.PRIMARY_PURPLE }]}
+                            >
+                                <Text style={styles.tourButtonText}>
+                                    {currentTourStep === featureSteps.length - 1 ? 'Get Started' : 'Next'}
+                                </Text>
+                            </Pressable>
+                        </View>
+                    </View>
+                </Animated.View>
+            </Modal>
         </SafeAreaView>
     );
 }
@@ -336,7 +493,12 @@ const styles = StyleSheet.create({
         shadowOpacity: 0.18,
         shadowRadius: 14,
         shadowOffset: { width: 0, height: 8 },
-        alignItems: 'center'
+    },
+    headerTitleRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: 12,
     },
     title: {
         color: C.TEXT_ON_PURPLE,
@@ -348,9 +510,43 @@ const styles = StyleSheet.create({
     },
     subtitle: {
         color: '#F0EBFF',
-        textAlign: 'center',
         marginTop: 6,
         opacity: 0.9,
+    },
+    balanceCard: {
+        backgroundColor: '#FFFFFF',
+        borderRadius: 18,
+        padding: 20,
+        marginTop: 16,
+        borderWidth: 2,
+        borderColor: C.PRIMARY_PURPLE,
+        shadowColor: '#7C3AED',
+        shadowOpacity: 0.12,
+        shadowRadius: 12,
+        shadowOffset: { width: 0, height: 6 },
+        elevation: 8,
+    },
+    balanceHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        marginBottom: 10,
+    },
+    balanceLabel: {
+        fontSize: 14,
+        color: C.TEXT_SECONDARY,
+        fontWeight: '700',
+        letterSpacing: 0.5,
+    },
+    balanceAmount: {
+        fontSize: 32,
+        fontWeight: '900',
+        color: C.PRIMARY_PURPLE,
+        marginBottom: 8,
+    },
+    balanceNote: {
+        fontSize: 13,
+        fontWeight: '700',
     },
     summaryRow: {
         flexDirection: 'row',
@@ -482,5 +678,94 @@ const styles = StyleSheet.create({
         shadowRadius: 10,
         shadowOffset: { width: 0, height: 8 },
         elevation: 10
+    },
+    // Feature Tour Styles
+    tourOverlay: {
+        ...StyleSheet.absoluteFillObject,
+        justifyContent: 'center',
+        alignItems: 'center',
+        zIndex: 9999,
+    },
+    blurContainer: {
+        ...StyleSheet.absoluteFillObject,
+        backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    },
+    tourContent: {
+        flex: 1,
+        justifyContent: 'center',
+        alignItems: 'center',
+        paddingHorizontal: 20,
+        zIndex: 10000,
+    },
+    tourCard: {
+        backgroundColor: '#FFFFFF',
+        borderRadius: 24,
+        padding: 28,
+        width: '100%',
+        maxWidth: 340,
+        alignItems: 'center',
+        shadowColor: '#000',
+        shadowOpacity: 0.3,
+        shadowRadius: 20,
+        shadowOffset: { width: 0, height: 12 },
+        elevation: 20,
+    },
+    tourIconContainer: {
+        width: 80,
+        height: 80,
+        borderRadius: 40,
+        backgroundColor: '#EFEAFE',
+        justifyContent: 'center',
+        alignItems: 'center',
+        marginBottom: 16,
+    },
+    tourTitle: {
+        fontSize: 20,
+        fontWeight: '900',
+        color: C.TEXT_PRIMARY,
+        marginBottom: 12,
+        textAlign: 'center',
+    },
+    tourDescription: {
+        fontSize: 14,
+        color: C.TEXT_SECONDARY,
+        textAlign: 'center',
+        lineHeight: 22,
+        marginBottom: 20,
+    },
+    tourDots: {
+        flexDirection: 'row',
+        gap: 8,
+        marginBottom: 20,
+        alignItems: 'center',
+    },
+    tourDot: {
+        width: 8,
+        height: 8,
+        borderRadius: 4,
+        backgroundColor: '#E5E7EB',
+    },
+    tourDotActive: {
+        width: 24,
+        backgroundColor: C.PRIMARY_PURPLE,
+    },
+    tourButton: {
+        paddingVertical: 14,
+        paddingHorizontal: 32,
+        borderRadius: 12,
+        width: '100%',
+        alignItems: 'center',
+    },
+    tourButtonText: {
+        color: '#FFF',
+        fontWeight: '900',
+        fontSize: 16,
+    },
+    closeButton: {
+        position: 'absolute',
+        top: 40,
+        right: 20,
+        zIndex: 10001,
+        padding: 8,
     },
 });

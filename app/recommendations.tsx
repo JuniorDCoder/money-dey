@@ -1,7 +1,11 @@
 import BottomTabs from '@/components/ui/bottom-tabs';
+import OfflineBanner from '@/components/ui/offline-banner';
 import Shimmer from '@/components/ui/shimmer';
+import SyncStatusIndicator from '@/components/ui/sync-status-indicator';
 import TopActions from '@/components/ui/top-actions';
 import * as C from '@/constants/colors';
+import { useNetworkStatus } from '@/hooks/use-network-status';
+import { useOfflineSync } from '@/hooks/use-offline-sync';
 import { useTransactions } from '@/hooks/use-transactions';
 import { auth, db } from '@/lib/firebase';
 import { Debt, Repayment } from '@/types/models';
@@ -53,6 +57,8 @@ export default function Recommendations() {
     const currentUid = auth?.currentUser?.uid;
     const useMock = !currentUid;
     const { transactions, loading, refetch, aggregates } = useTransactions({ userId: useMock ? undefined : currentUid, useMock });
+    const networkStatus = useNetworkStatus();
+    const syncState = useOfflineSync();
 
     const [refreshing, setRefreshing] = useState(false);
     const [messages, setMessages] = useState<Message[]>([]);
@@ -352,7 +358,7 @@ export default function Recommendations() {
 
     const callAi = async (prompt: string) => {
         try {
-            const apiKey = process.env.GEMINI_KEY;
+            const apiKey = process.env.EXPO_PUBLIC_GEMINI_KEY;
             if (!apiKey) throw new Error('Missing EXPO_PUBLIC_GEMINI_KEY');
 
             const model = 'gemini-2.5-flash';
@@ -436,6 +442,12 @@ export default function Recommendations() {
         } else {
             setMessages(prev => [...prev, { id: Date.now().toString(), text, sender: 'user', timestamp: new Date() }]);
             Toast.show({ type: 'info', text1: 'Not signed in', text2: 'Sign in to sync your chat messages.' });
+        }
+
+        if (!networkStatus.isOnline) {
+            Toast.show({ type: 'info', text1: 'Offline mode', text2: 'Your message is saved. AI replies when you are back online.' });
+            setIsTyping(false);
+            return;
         }
 
         const aiText = await callAi(text);
@@ -612,6 +624,10 @@ export default function Recommendations() {
 
     return (
         <SafeAreaView style={styles.container}>
+            <OfflineBanner isOnline={networkStatus.isOnline} isSyncing={syncState.isSyncing} pendingCount={syncState.pendingCount} />
+            <View style={{ position: 'absolute', top: 32, right: 16, zIndex: 10 }}>
+                <SyncStatusIndicator isOnline={networkStatus.isOnline} isSyncing={syncState.isSyncing} hasFailures={syncState.failedCount > 0} />
+            </View>
             <TopActions />
             <KeyboardAvoidingView
                 behavior={Platform.OS === 'ios' ? 'padding' : 'height'}

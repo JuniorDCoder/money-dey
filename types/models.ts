@@ -39,6 +39,7 @@ export interface Transaction {
   counterpartyName?: string;
   debtId?: string;
   direction?: 'owed' | 'owing';
+  synced?: boolean; // indicates if transaction is synced with Firestore (defaults to true for Firestore items)
 }
 
 // New debt model
@@ -58,6 +59,7 @@ export interface Debt {
   notificationId?: string | null; // ID of the scheduled notification
   createdAt?: any; // Firestore Timestamp or ISO
   updatedAt?: any; // Firestore Timestamp or ISO
+  synced?: boolean; // indicates if debt is synced with Firestore (defaults to true for Firestore items)
 }
 
 // Repayment model - tracks individual payments against a debt

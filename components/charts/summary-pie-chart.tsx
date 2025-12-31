@@ -82,28 +82,32 @@ export default function SummaryPieChart({ data, size, thickness = 20 }: SummaryP
             </G>
           </Svg>
         )}
-        {/* Center label with total */}
-        <View style={[styles.centerLabel, { width: chartSize, height: chartSize }] }>
-          <Text style={styles.centerTitle}>Analytics</Text>
-          {!showEmpty && (
+        {/* Center label with total - only show if not empty */}
+        {!showEmpty && (
+          <View style={[styles.centerLabel, { width: chartSize, height: chartSize }] }>
+            <Text style={styles.centerTitle}>Analytics</Text>
             <Text style={styles.centerValue}>{cleaned.total.toLocaleString()}</Text>
-          )}
-        </View>
+          </View>
+        )}
       </View>
 
-      {/* Legend */}
-      <View style={styles.legend}>
-        {data.map((d) => {
-          const pct = cleaned.total > 0 ? Math.round((Math.max(0, d.value) / cleaned.total) * 100) : 0;
-          return (
-            <View key={d.label} style={styles.legendItem}>
-              <View style={[styles.legendDot, { backgroundColor: d.color }]} />
-              <Text style={styles.legendText}>{d.label}</Text>
-              <Text style={styles.legendPct}>{pct}%</Text>
-            </View>
-          );
-        })}
-      </View>
+      {/* Legend - 2 columns grid layout */}
+      {!showEmpty && (
+        <View style={styles.legend}>
+          {data.map((d) => {
+            const pct = cleaned.total > 0 ? Math.round((Math.max(0, d.value) / cleaned.total) * 100) : 0;
+            return (
+              <View key={d.label} style={styles.legendItem}>
+                <View style={[styles.legendDot, { backgroundColor: d.color }]} />
+                <View style={styles.legendTextContainer}>
+                  <Text style={styles.legendText}>{d.label}</Text>
+                  <Text style={styles.legendPct}>{pct}%</Text>
+                </View>
+              </View>
+            );
+          })}
+        </View>
+      )}
     </View>
   );
 }
@@ -122,7 +126,9 @@ const styles = StyleSheet.create({
     borderColor: '#E2E8F0'
   },
   emptyText: {
-    color: '#64748B'
+    color: '#64748B',
+    fontWeight: '700',
+    fontSize: 14
   },
   centerLabel: {
     position: 'absolute',
@@ -141,12 +147,12 @@ const styles = StyleSheet.create({
     color: '#111827'
   },
   legend: {
-    marginTop: 12,
-    width: '90%',
+    marginTop: 16,
+    width: '100%',
     flexDirection: 'row',
     flexWrap: 'wrap',
     justifyContent: 'space-between',
-    gap: 8
+    gap: 12
   },
   legendItem: {
     flexDirection: 'row',
@@ -154,24 +160,38 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFFEE',
     borderWidth: 1,
     borderColor: '#E5E7EB',
-    borderRadius: 12,
-    paddingVertical: 8,
-    paddingHorizontal: 10,
-    minWidth: '45%'
+    borderRadius: 14,
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    width: '48%',
+    shadowColor: '#000',
+    shadowOpacity: 0.04,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 2
   },
   legendDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    marginRight: 8
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    marginRight: 10,
+    flexShrink: 0
+  },
+  legendTextContainer: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between'
   },
   legendText: {
     color: '#111827',
     fontWeight: '700',
-    flex: 1
+    fontSize: 13
   },
   legendPct: {
     color: '#6B7280',
-    fontWeight: '800'
+    fontWeight: '800',
+    fontSize: 12,
+    marginLeft: 6
   }
 });
